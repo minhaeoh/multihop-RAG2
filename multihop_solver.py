@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import time
@@ -12,14 +11,16 @@ from transformers import (
     DPRQuestionEncoderTokenizer, 
     DPRQuestionEncoder
 )
-import gc
 import faiss
 import gzip
 import csv
 import wandb
+import json
+import numpy as np
+import logging
 
 class MultiHopSolver:
-    def __init__(self, model_id="meta-llama/Llama-3.3-70B-Instruct", ex_num=2, subject="high_school_chemistry", generate_ex=True, review_doc=False, review_ex=False, zeroshot=False, summarize=False):
+    def __init__(self, model_id="meta-llama/Llama-3.3-70B-Instruct", ex_num=2, subject="high_school_chemistry", generate_ex=True, review_doc=True, review_ex=True, zeroshot=False, summarize=False):
         # Initialize environment
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         load_dotenv(dotenv_path=env_path)
@@ -37,7 +38,7 @@ class MultiHopSolver:
         self.timestamp = time.strftime("%Y%m%d_%H%M%S")
         
         # Create output directory with all argument information
-        base_dir = "/home/minhae/multihop-RAG/results/0403"
+        base_dir = os.path.join(os.path.dirname(__file__), "results")
         dir_name = f"{self.subject}_{self.model_id.split('/')[-1]}"
         
         # Add configuration details to directory name
@@ -79,43 +80,8 @@ class MultiHopSolver:
             print(f"Error initializing Llama model: {e}")
             raise
         
-
-        print("Setting up DPR components...")
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # 1. Query encoder & tokenizer 초기화
-        try:
-            self.q_tokenizer = DPRQuestionEncoderTokenizer.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
-            self.q_encoder = DPRQuestionEncoder.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
-            self.q_encoder = self.q_encoder.to(self.device)
-            self.q_encoder.eval()
-        except Exception as e:
-            print(f"Error initializing DPR components: {e}")
-            raise
-        
-        # 2. FAISS 인덱스와 패시지 데이터 로드
-        data_dir = "/home/minhae/multihop-RAG/wikipedia/dpr"
-        try:
-            # FAISS 인덱스 로드
-            index_path = os.path.join(data_dir, "psgs_w100.nq.exact.faiss")
-            self.index = faiss.read_index(index_path)
-            
-            # 원본 텍스트 데이터 로드
-            passages_path = os.path.join(data_dir, "psgs_w100.tsv.gz")
-            self.passages = []
-            with gzip.open(passages_path, 'rt', encoding='utf-8') as f:
-                reader = csv.reader(f, delimiter='\t')
-                next(reader)  # 헤더 스킵
-                for row in reader:
-                    if len(row) >= 3:  # id, text, title
-                        self.passages.append({
-                            'id': row[0],
-                            'text': row[1][1:-1].replace('""', '"'),  # 따옴표 처리
-                            'title': row[2]
-                        })
-        except Exception as e:
-            print(f"Error loading FAISS index or passages: {e}")
-            raise
+        # Initialize DPR components
+        self.setup_wiki_retriever()
         
         # Initialize wandb
         self.run = wandb.init(
@@ -133,6 +99,34 @@ class MultiHopSolver:
             }
         )
         self.run.name = f"{dir_name}_{config_str}"
+
+    def setup_wiki_retriever(self):
+        """Setup FAISS retriever with DPR encoders"""
+        print("Setting up DPR components...")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        try:
+            # 1. Load the DPR dataset
+            print("Loading DPR dataset...")
+            self.ds = load_dataset("facebook/wiki_dpr", 'psgs_w100.nq.exact')
+            
+            # 2. Get the FAISS index from the dataset
+            self.index = self.ds.get_index("embeddings").faiss_index
+            print(f"FAISS index metric type: {self.index.metric_type}")
+            
+            # 3. Get the passages from the dataset
+            self.passages = self.ds['train']
+            print(f"Loaded {len(self.passages)} passages")
+            
+            # 4. Initialize query encoder & tokenizer
+            self.q_tokenizer = DPRQuestionEncoderTokenizer.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
+            self.q_encoder = DPRQuestionEncoder.from_pretrained("facebook/dpr-question_encoder-single-nq-base")
+            self.q_encoder = self.q_encoder.to(self.device)
+            self.q_encoder.eval()
+            
+        except Exception as e:
+            print(f"Error in setup_wiki_retriever: {e}")
+            raise
 
     def generate_text(self, prompt, strip_prompt, max_length=512, temperature=0.7, top_p=0.9, repetition_penalty=1.1):
         """Generate text using the Llama pipeline with output cleaning"""
@@ -277,22 +271,16 @@ Summary:"""
     def get_wiki_search_results(self, query, num_results=3, review=True):
         """Get search results using DPR and FAISS"""
         try:
-            # 쿼리 인코딩
-            with torch.no_grad():
-                query_inputs = self.q_tokenizer(
-                    [query],
-                    padding=True,
-                    truncation=True,
-                    max_length=512,
-                    return_tensors="pt"
-                ).to(self.device)
-                
-                query_vector = self.q_encoder(**query_inputs).pooler_output
-                query_vector = query_vector.cpu().numpy()
+            # Encode query
+            inputs = self.q_tokenizer(query, return_tensors="pt", padding=True, truncation=True)
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            # FAISS로 검색
+            with torch.no_grad():
+                query_embedding = self.q_encoder(**inputs).pooler_output.cpu().numpy()
+            
+            # Search in FAISS index
             search_num = num_results * 2 if review else num_results
-            distances, indices = self.index.search(query_vector, search_num)
+            distances, indices = self.index.search(query_embedding, search_num)
             
             documents = []
             for i, (score, idx) in enumerate(zip(distances[0], indices[0])):
@@ -303,13 +291,13 @@ Summary:"""
                 content = passage['text']
                 title = passage['title']
                 
-                # 문서 요약 (옵션)
+                # Document summarization (optional)
                 if self.summarize:
                     content = self.summarize_document(content)
                 
                 doc = f"Document {i+1} (score: {score:.2f}) [Title: {title}]:\n{content}"
                 
-                # 문서 관련성 검토 (옵션)
+                # Document relevance review (optional)
                 if review:
                     print(f"Reviewing document {i+1}/{search_num}...")
                     if self.review_document(query, content):
@@ -828,7 +816,7 @@ Final Answer:
                     
                     # Time document retrieval
                     start = time.time()
-                    documents = self.get_wiki_search_results(search_queries[step_num - 1], review=self.review_doc)
+                    documents = self.get_wiki_search_results(search_queries[step_num - 1], top_k=5)
                     step_timing['document_retrieval'] = time.time() - start
 
                     if documents == "No relevant documents found.":
