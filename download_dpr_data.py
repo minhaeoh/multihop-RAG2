@@ -29,7 +29,7 @@ def download_file(url, local_path):
             size = f.write(data)
             pbar.update(size)
 
-def setup_dpr_data(data_dir=None):
+def setup_dpr_data(data_dir=None): 
     """Download and setup DPR data
     
     Args:
@@ -43,7 +43,7 @@ def setup_dpr_data(data_dir=None):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         # Create path relative to the script location
         data_dir = os.path.join(script_dir, "wikipedia", "dpr")
-        
+
     logging.info("Starting DPR data setup...")
     
     # Create data directory if it doesn't exist

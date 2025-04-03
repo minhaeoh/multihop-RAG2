@@ -90,7 +90,7 @@ class MultiHopSolver:
         except Exception as e:
             print(f"Error initializing DPR components: {e}")
             raise
-        
+         
         # 2. FAISS 인덱스와 패시지 데이터 로드
         data_dir = os.path.join(os.path.dirname(__file__), "wikipedia", "dpr")
         try:
