@@ -6,7 +6,7 @@ import gzip
 from tqdm import tqdm
 
 def download_file(url, local_path):
-    """파일 다운로드 함수"""
+    """File download function"""
     if os.path.exists(local_path):
         logging.info(f"File already exists: {local_path}")
         return
@@ -25,15 +25,22 @@ def download_file(url, local_path):
             size = f.write(data)
             pbar.update(size)
 
-def setup_dpr_data(data_dir="/home/minhae/multihop-RAG/wikipedia/dpr"):
+def setup_dpr_data(data_dir=None):
     """Download and setup DPR data"""
-    logging.info("Starting DPR data setup...")
+    if data_dir is None:
+        # Get the directory where the script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Create path relative to the script location
+        data_dir = os.path.join(script_dir, "wikipedia", "dpr")
     
-    # 저장 디렉토리 생성
+    logging.info("Starting DPR data setup...")
+    logging.info(f"Data will be stored in: {data_dir}")
+    
+    # Create storage directory
     os.makedirs(data_dir, exist_ok=True)
     
     try:
-        # 1. 위키피디아 원본 데이터 다운로드
+        # 1. Download Wikipedia original data
         passages_path = os.path.join(data_dir, "psgs_w100.tsv.gz")
         if not os.path.exists(passages_path):
             download_file(
@@ -41,7 +48,7 @@ def setup_dpr_data(data_dir="/home/minhae/multihop-RAG/wikipedia/dpr"):
                 passages_path
             )
         
-        # 2. DPR 데이터셋과 FAISS 인덱스 다운로드
+        # 2. Download DPR dataset and FAISS index
         logging.info("Loading wiki_dpr dataset...")
         wiki_dpr = load_dataset("facebook/wiki_dpr", 
                               name="psgs_w100.nq.exact",
@@ -49,7 +56,7 @@ def setup_dpr_data(data_dir="/home/minhae/multihop-RAG/wikipedia/dpr"):
                               with_index=True,
                               trust_remote_code=True)
         
-        # FAISS 인덱스 저장
+        # Save FAISS index
         index_path = os.path.join(data_dir, "psgs_w100.nq.exact.faiss")
         if not os.path.exists(index_path):
             logging.info("Saving FAISS index...")
@@ -63,11 +70,11 @@ def setup_dpr_data(data_dir="/home/minhae/multihop-RAG/wikipedia/dpr"):
         raise
 
 if __name__ == "__main__":
-    # 로깅 설정
+    # Set up logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     
-    # DPR 데이터 설정
+    # Setup DPR data
     setup_dpr_data() 
