@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import time
@@ -12,7 +11,6 @@ from transformers import (
     DPRQuestionEncoderTokenizer, 
     DPRQuestionEncoder
 )
-import gc
 import faiss
 import gzip
 import csv
@@ -37,7 +35,7 @@ class MultiHopSolver:
         self.timestamp = time.strftime("%Y%m%d_%H%M%S")
         
         # Create output directory with all argument information
-        base_dir = "/home/minhae/multihop-RAG/results/0403"
+        base_dir = os.path.join(os.path.dirname(__file__), "results")
         dir_name = f"{self.subject}_{self.model_id.split('/')[-1]}"
         
         # Add configuration details to directory name
@@ -94,7 +92,7 @@ class MultiHopSolver:
             raise
         
         # 2. FAISS 인덱스와 패시지 데이터 로드
-        data_dir = "/home/minhae/multihop-RAG/wikipedia/dpr"
+        data_dir = os.path.join(os.path.dirname(__file__), "wikipedia", "dpr")
         try:
             # FAISS 인덱스 로드
             index_path = os.path.join(data_dir, "psgs_w100.nq.exact.faiss")
