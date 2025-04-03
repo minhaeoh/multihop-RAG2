@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Create new conda environment
+# Create new conda environment 
 ENV_NAME="multihop"
 
 # 기존 환경이 있다면 제거
