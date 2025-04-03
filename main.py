@@ -1,10 +1,10 @@
 import os
 import argparse
-import time
 from datasets import load_dataset
 from tqdm import tqdm
 from multihop_solver import MultiHopSolver
-
+import torch
+import gc
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -23,7 +23,7 @@ def main():
     # Add arguments
     parser.add_argument('--model_id', 
                        type=str, 
-                       default='meta-llama/Llama-3.3-70B-Instruct',
+                       default='meta-llama/Llama-3.1-8B-Instruct',
                        help='Model ID to use (default: meta-llama/Llama-3.3-70B-Instruct)')
     
     parser.add_argument('--ex_num', 
@@ -62,29 +62,8 @@ def main():
                        default=False,
                        help='Whether to summarize retrieved documents (default: False)')
     
-    parser.add_argument('--contents_path',
-                       type=str,
-                       default="/home/minhae/multihop-RAG/wikipedia/dpr/wiki_contents.json",
-                       help='Path to wiki contents file')
-    
-    parser.add_argument('--chunk_path',
-                       type=str,
-                       default="/home/minhae/multihop-RAG/wikipedia/dpr/wiki_chunks.json",
-                       help='Path to wiki chunks file')
-    
-    parser.add_argument('--embeddings_path',
-                       type=str,
-                       default="/home/minhae/multihop-RAG/wikipedia/dpr/embeddings.npy",
-                       help='Path to embeddings file')
-    
-    parser.add_argument('--index_path',
-                       type=str,
-                       default="/home/minhae/multihop-RAG/wikipedia/dpr/wikipedia_index.faiss",
-                       help='Path to FAISS index file')
-    
     # Parse arguments
     args = parser.parse_args()
-    
     
     # Load dataset to get total number of problems for the subject
     ds = load_dataset("TIGER-Lab/MMLU-STEM")
@@ -105,15 +84,14 @@ def main():
         summarize=args.summarize
     )
     
-    # 각 문제를 순차적으로 처리
+    # Process each problem sequentially
     correct_count = 0
     total_count = 0
     for prob_num in tqdm(range(1, total_problems + 1), desc="Processing problems"):
         try:
             solver.solve_problem(args.subject, prob_num)
-            # 필요한 경우 여기서 결과 처리 및 통계 계산
             total_count += 1
-            # GPU 메모리 정리
+            # Clear GPU memory
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
