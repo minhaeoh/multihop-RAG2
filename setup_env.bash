@@ -21,6 +21,9 @@ pip install faiss-gpu
 pip install datasets
 pip install dotenv
 pip install transformers
+pip install wandb
+pip install accelerate==1.5.2
+
 
 conda env export > environment.yml
 echo "Environment setup complete. Please activate the environment with 'source activate $ENV_NAME'"
