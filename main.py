@@ -24,18 +24,12 @@ def main():
     parser.add_argument('--model_id', 
                        type=str, 
                        default='meta-llama/Llama-3.1-8B-Instruct',
-                       help='Model ID to use (default: meta-llama/Llama-3.3-70B-Instruct)')
+                       help='Model ID to use (default: meta-llama/Llama-3.1-8B-Instruct)')
     
     parser.add_argument('--ex_num', 
                        type=int,        
                        default=4,
                        help='Number of examples to generate (default: 4)')
-    
-    parser.add_argument('--subject', 
-                       type=str, 
-                       default='high_school_chemistry',
-                       choices=['abstract_algebra', 'anatomy', 'astronomy', 'college_biology', 'college_chemistry', 'college_computer_science', 'college_mathematics', 'college_physics', 'computer_security', 'conceptual_physics', 'electrical_engineering', 'elementary_mathematics', 'high_school_biology', 'high_school_chemistry', 'high_school_computer_science', 'high_school_mathematics', 'high_school_physics', 'high_school_statistics', 'machine_learning'],
-                       help='Subject to solve problems from (default: high_school_chemistry)')
     
     parser.add_argument('--generate_ex', 
                        type=str2bool, 
@@ -66,37 +60,34 @@ def main():
     args = parser.parse_args()
     
     # Load dataset to get total number of problems for the subject
+    subjects = ['high_school_physics', 'high_school_chemistry', 'college_physics', 'high_school_mathematics']
     ds = load_dataset("TIGER-Lab/MMLU-STEM")
-    data = ds['test'].filter(lambda x: x['subject'].lower()==args.subject)
-    total_problems = len(data)
-    
-    print(f"Running all {total_problems} problems for {args.subject}")
-    
-    # Initialize solver
-    solver = MultiHopSolver(
-        model_id=args.model_id,
-        ex_num=args.ex_num,
-        subject=args.subject,
-        generate_ex=args.generate_ex,
-        review_ex=args.review_ex,
-        review_doc=args.review_doc,
-        zeroshot=args.zeroshot,
-        summarize=args.summarize
-    )
-    
-    # Process each problem sequentially
-    correct_count = 0
-    total_count = 0
-    for prob_num in tqdm(range(1, total_problems + 1), desc="Processing problems"):
-        try:
-            solver.solve_problem(args.subject, prob_num)
-            total_count += 1
-            # Clear GPU memory
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            gc.collect()
-        except Exception as e:
-            print(f"Error processing problem {prob_num}: {e}")
+    for subject in subjects:
+        data = ds['test'].filter(lambda x: x['subject'].lower() == subject)
+
+        # Initialize solver
+        solver = MultiHopSolver(
+            model_id=args.model_id,
+            ex_num=args.ex_num,
+            subject=subject,
+            generate_ex=args.generate_ex,
+            review_ex=args.review_ex,
+            review_doc=args.review_doc,
+            zeroshot=args.zeroshot,
+            summarize=args.summarize
+        )
+        print(f"Running all {len(data)} problems for {subject}")
+        for prob_num in tqdm(range(1, len(data) + 1), desc=f"Processing {subject} problems"):
+            try:
+                solver.solve_problem(subject, prob_num)
+                # Clear GPU memory
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+            except Exception as e:
+                print(f"Error processing problem {prob_num}: {e}")
+
+
 
 if __name__ == "__main__":
     main()

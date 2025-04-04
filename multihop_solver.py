@@ -85,7 +85,7 @@ class MultiHopSolver:
         
         # Initialize wandb
         self.run = wandb.init(
-            project=f"multihop-RAG-{self.subject}",
+            project=f"multihop-dpr-{self.subject}",
             entity="minhae",
             config={
                 "model_id": model_id,
@@ -106,16 +106,16 @@ class MultiHopSolver:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         try:
-            # 1. Load the DPR dataset
-            print("Loading DPR dataset...")
-            self.ds = load_dataset("facebook/wiki_dpr", 'psgs_w100.nq.exact')
+            # 1. Load a small subset of the DPR dataset for testing
+            print("Loading small subset of DPR dataset...")
+            self.ds = load_dataset("facebook/wiki_dpr", 'psgs_w100.nq.exact', split='train[:1000]')  # Load only first 1000 examples
             
             # 2. Get the FAISS index from the dataset
             self.index = self.ds.get_index("embeddings").faiss_index
             print(f"FAISS index metric type: {self.index.metric_type}")
             
             # 3. Get the passages from the dataset
-            self.passages = self.ds['train']
+            self.passages = self.ds
             print(f"Loaded {len(self.passages)} passages")
             
             # 4. Initialize query encoder & tokenizer
@@ -271,25 +271,42 @@ Summary:"""
     def get_wiki_search_results(self, query, num_results=3, review=True):
         """Get search results using DPR and FAISS"""
         try:
+            print(f"\nDebug: Starting search for query: '{query}'")
+            
             # Encode query
+            print("Debug: Encoding query...")
             inputs = self.q_tokenizer(query, return_tensors="pt", padding=True, truncation=True)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
             with torch.no_grad():
                 query_embedding = self.q_encoder(**inputs).pooler_output.cpu().numpy()
+            print(f"Debug: Query embedding shape: {query_embedding.shape}")
             
             # Search in FAISS index
             search_num = num_results * 2 if review else num_results
+            print(f"Debug: Searching FAISS index for {search_num} results...")
             distances, indices = self.index.search(query_embedding, search_num)
+            print(f"Debug: Found {len(indices[0])} results")
+            print(f"Debug: Distances: {distances[0]}")
+            print(f"Debug: Indices: {indices[0]}")
             
             documents = []
             for i, (score, idx) in enumerate(zip(distances[0], indices[0])):
+                print(f"\nDebug: Processing result {i+1}")
+                print(f"Debug: Score: {score}, Index: {idx}")
+                
+                # Convert numpy types to Python native types
+                idx = int(idx)
+                score = float(score)
+                
                 if idx >= len(self.passages):
+                    print(f"Debug: Index {idx} out of range (max: {len(self.passages)})")
                     continue
                     
                 passage = self.passages[idx]
                 content = passage['text']
                 title = passage['title']
+                print(f"Debug: Retrieved passage title: {title}")
                 
                 # Document summarization (optional)
                 if self.summarize:
@@ -299,23 +316,29 @@ Summary:"""
                 
                 # Document relevance review (optional)
                 if review:
-                    print(f"Reviewing document {i+1}/{search_num}...")
+                    print(f"Debug: Reviewing document {i+1}/{search_num}...")
                     if self.review_document(query, content):
                         documents.append(doc)
+                        print(f"Debug: Document {i+1} marked as relevant")
                         if len(documents) >= num_results:
                             break
+                    else:
+                        print(f"Debug: Document {i+1} marked as not relevant")
                 else:
                     documents.append(doc)
                     if len(documents) >= num_results:
                         break
             
             if not documents:
+                print("Debug: No relevant documents found after processing all results")
                 return "No relevant documents found."
             
             return "\n\n".join(documents)
             
         except Exception as e:
             print(f"Error in wiki search: {e}")
+            import traceback
+            traceback.print_exc()
             return "No relevant documents found."
 
     def review_example(self, subquestion, example):
@@ -763,15 +786,18 @@ Final Answer:
                     self._correct_problems = 1 if predicted_answer == problem['answer'] else 0
                 
                 current_accuracy = (self._correct_problems / self._total_problems) * 100
-                
+
+                if predicted_answer == problem['answer']:
+                    correct_check = 1
+                else:
+                    correct_check = 0
+
                 # Log metrics to wandb
                 self.run.log({
                     "accuracy": current_accuracy,
                     "correct_problems": self._correct_problems,
                     "total_problems": self._total_problems,
-                    "problem_num": prob_num,
-                    "predicted_answer": predicted_answer,
-                    "actual_answer": problem['answer'],
+                    "is_correct": correct_check
                 })
                 
                 # Save to summary file with running accuracy
@@ -816,7 +842,7 @@ Final Answer:
                     
                     # Time document retrieval
                     start = time.time()
-                    documents = self.get_wiki_search_results(search_queries[step_num - 1], top_k=5)
+                    documents = self.get_wiki_search_results(search_queries[step_num - 1], num_results=5)
                     step_timing['document_retrieval'] = time.time() - start
 
                     if documents == "No relevant documents found.":
@@ -895,15 +921,17 @@ Final Answer:
                 
                 current_accuracy = (self._correct_problems / self._total_problems) * 100
                 
+                if predicted_answer == problem['answer']:
+                    correct_check = 1
+                else:
+                    correct_check = 0
+                
                 # Log metrics to wandb
                 self.run.log({
                     "accuracy": current_accuracy,
                     "correct_problems": self._correct_problems,
                     "total_problems": self._total_problems,
-                    "problem_num": prob_num,
-                    "predicted_answer": predicted_answer,
-                    "actual_answer": problem['answer'],
-                    "is_correct": predicted_answer == problem['answer']
+                    "is_correct": correct_check
                 })
 
                 # Save to summary file with running accuracy
